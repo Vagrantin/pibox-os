@@ -9,12 +9,12 @@ VG_GROUP_NAME="pibox-group"
 DISKS_TO_ADD=""
 
 # To undo this entire script or to test:
-# service k3s stop
+# service data stop
 # killall containerd-shim
 # umount /var/lib/rancher
 # umount /var/lib/rancher-ssd
-# wipefs -af /dev/pibox-group/k3s
-# lvremove /dev/pibox-group/k3s
+# wipefs -af /dev/pibox-group/data
+# lvremove /dev/pibox-group/data
 # vgreduce --removemissing pibox-group
 # vgremove pibox-group
 # pvremove /dev/sda1
@@ -25,7 +25,7 @@ DISKS_TO_ADD=""
 # sfdisk --delete /dev/sdb 1
 # wipefs -a /dev/sda
 # wipefs -a /dev/sdb
-# sed -i 's/\/dev\/pibox-group\/k3s \/var\/lib\/rancher ext4 defaults,discard,nofail,noatime,data=ordered,errors=remount-ro 0 0//g' /etc/fstab
+# sed -i 's/\/dev\/pibox-group\/data \/var\/lib\/rancher ext4 defaults,discard,nofail,noatime,data=ordered,errors=remount-ro 0 0//g' /etc/fstab
 
 echo "Running provision-disk.sh"
 
@@ -52,24 +52,24 @@ for DISK in /dev/sda /dev/sdb /dev/sdc /dev/sdd /dev/sde; do
   fi
 done
 
-function migrateK3s {
+function migrateDATA {
   # Add the mount location to /etc/fstab - note that we use data=ordered and journaling, which is potentially
   # slower than 'data=writeback' and `mkfs.ext4 -O ^has_journal`, but safer and more durable against crashes and power-loss
   # fast_commit above helps keep this from being too much of a slowdown
-  echo "/dev/${VG_GROUP_NAME}/k3s /var/lib/rancher ext4 defaults,discard,nofail,noatime,data=ordered,errors=remount-ro 0 0" >> /etc/fstab
-  mkdir -p /etc/systemd/system/k3s.service.d/ || echo "Directory already exists"
-  echo -e "[Unit]\nAfter=var-lib-rancher.mount\nRequires=var-lib-rancher.mount" > /etc/systemd/system/k3s.service.d/mount.conf
+  echo "/dev/${VG_GROUP_NAME}/data /var/lib/rancher ext4 defaults,discard,nofail,noatime,data=ordered,errors=remount-ro 0 0" >> /etc/fstab
+  mkdir -p /etc/systemd/system/data.service.d/ || echo "Directory already exists"
+  echo -e "[Unit]\nAfter=var-lib-rancher.mount\nRequires=var-lib-rancher.mount" > /etc/systemd/system/data.service.d/mount.conf
   mkdir -p /etc/systemd/system/pibox-first-boot.service.d/ || echo "Directory already exists"
   echo -e "[Unit]\nAfter=var-lib-rancher.mount\nRequires=var-lib-rancher.mount" > /etc/systemd/system/pibox-first-boot.service.d/mount.conf
   systemctl daemon-reload
 
   # Migrate K3S if it exists (move /var/lib/rancher onto new LVM group)
-  if [[ -d "/var/lib/rancher/k3s" ]]; then
-    pgrep k3s && service k3s stop
+  if [[ -d "/var/lib/rancher/data" ]]; then
+    pgrep data && service data stop
     # Create a temporary directory
     mkdir -p /var/lib/rancher-ssd
-    mount /dev/${VG_GROUP_NAME}/k3s /var/lib/rancher-ssd
-    # Copy k3s into temp dir
+    mount /dev/${VG_GROUP_NAME}/data /var/lib/rancher-ssd
+    # Copy data into temp dir
     rsync -aqxP /var/lib/rancher/* /var/lib/rancher-ssd
     # Remove old rancher dir
     rm -rf /var/lib/rancher
@@ -77,13 +77,13 @@ function migrateK3s {
     umount -l /var/lib/rancher-ssd
     # Mount volume
     mkdir -p /var/lib/rancher
-    mount /dev/${VG_GROUP_NAME}/k3s
+    mount /dev/${VG_GROUP_NAME}/data
     # Cleanup old dir
     rm -rf /var/lib/rancher-ssd
-    echo "You may need to start k3s again with 'service k3s start', if you ran this script manually."
+    echo "You may need to start data again with 'service data start', if you ran this script manually."
   else
     mkdir -p /var/lib/rancher
-    mount /dev/${VG_GROUP_NAME}/k3s
+    mount /dev/${VG_GROUP_NAME}/data
   fi
 }
 
@@ -95,26 +95,26 @@ if [[ "$(vgdisplay ${VG_GROUP_NAME})" == "" && "${DISKS_TO_ADD}" != "" ]]; then
 
   vgcreate "${VG_GROUP_NAME}" ${DISKS_TO_ADD}
   # Use 100% of available space
-  lvcreate -n k3s -l "100%FREE" "${VG_GROUP_NAME}"
+  lvcreate -n data -l "100%FREE" "${VG_GROUP_NAME}"
   # Create a new EXT4 filesystem with zero reserved space
-  mkfs.ext4 -F -m 0 -b 4096 "/dev/${VG_GROUP_NAME}/k3s"
+  mkfs.ext4 -F -m 0 -b 4096 "/dev/${VG_GROUP_NAME}/data"
   # Enable "fast_commit" https://www.phoronix.com/scan.php?page=news_item&px=EXT4-Fast-Commit-Queued
-  tune2fs -O fast_commit "/dev/${VG_GROUP_NAME}/k3s"
+  tune2fs -O fast_commit "/dev/${VG_GROUP_NAME}/data"
   # Run a filesystem check to make sure things are OK
-  e2fsck -p -f "/dev/${VG_GROUP_NAME}/k3s"
+  e2fsck -p -f "/dev/${VG_GROUP_NAME}/data"
 
-  migrateK3s
+  migrateDATA
 
   # curl --unix-socket /var/run/pibox/framebuffer.sock -X POST http://localhost/rgb -XPOST -d '{"R":0, "G": 255, "B": 0}' || true
   # curl --unix-socket /var/run/pibox/framebuffer.sock -X POST "http://localhost/text?size=38&y=110&content=Done+Formatting!" || true
 elif [[ "${DISKS_TO_ADD}" != "" ]]; then
   echo "Extending disk array, adding: ${DISKS_TO_ADD}"
   vgextend "${VG_GROUP_NAME}" ${DISKS_TO_ADD}
-  lvextend -l +"100%FREE" /dev/${VG_GROUP_NAME}/k3s
-  resize2fs /dev/${VG_GROUP_NAME}/k3s
+  lvextend -l +"100%FREE" /dev/${VG_GROUP_NAME}/data
+  resize2fs /dev/${VG_GROUP_NAME}/data
 elif [[ "$(vgdisplay ${VG_GROUP_NAME})" != "" ]]; then
   grep "${VG_GROUP_NAME}" /etc/fstab || {
-    migrateK3s
+    migrateDATA
   }
 else
   echo "No disks to format, continuing. DISKS_TO_ADD was: ${DISKS_TO_ADD}"

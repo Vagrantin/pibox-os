@@ -32,24 +32,19 @@ EOF
 
 cp /home/pi/.bashrc /root/.bashrc
 
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash - &&
-  apt-get update -yqq
+apt-get update -yqq
 apt-get full-upgrade -yqq
 apt-get autoremove -yqq
 apt-get autoclean -yqq
 apt-get install -yqq \
   vim lvm2 raspberrypi-kernel-headers samba samba-common-bin \
   tmate sysstat smartmontools git iptables cryptsetup whois \
-  jq build-essential libcairo2-dev libpango1.0-dev \
-  libjpeg-dev libgif-dev librsvg2-dev nodejs
+  jq build-essential
 
 # Disable ASPM (low power PCIe mode) for our ASM1061 chip.
 # It does not play nicely with the CM4 during heavy workloads
 # and will flood system logs with AER warnings
 sed -i 's/rootwait/pcie_aspm=off rootwait/' /boot/firmware/cmdline.txt
-
-# Install node version manager
-npm i -g n
 
 # Give sudoers NOPASSWD requirement (same as pi user)
 sed -i 's/%sudo\tALL=(ALL:ALL) ALL/%sudo\tALL=(ALL:ALL) NOPASSWD: ALL/' /etc/sudoers
@@ -57,25 +52,6 @@ sed -i 's/%sudo\tALL=(ALL:ALL) ALL/%sudo\tALL=(ALL:ALL) NOPASSWD: ALL/' /etc/sud
 mkdir -p /pibox
 mkdir -p /etc/pibox-host
 groupadd sambagroup
-
-# Download pibox-host backend
-mkdir -p /opt/pibox-host
-PIBOX_HOST_VERSION=$(curl -s "https://api.github.com/repos/kubesail/pibox-host/releases/latest" | jq -r '.tag_name')
-TARGET_DIR=/opt/pibox-host/$PIBOX_HOST_VERSION
-mkdir -p $TARGET_DIR
-echo "Extracting tarball to $TARGET_DIR ... (this may take a while)"
-if [ -f pibox-host-$PIBOX_HOST_VERSION.tar.gz ]; then
-  echo "Using existing tarball"
-else
-  echo "Downloading tarball"
-  curl -L https://github.com/kubesail/pibox-host/releases/download/$PIBOX_HOST_VERSION/pibox-host-$PIBOX_HOST_VERSION.tar.gz \
-    -o /opt/pibox-host/pibox-host-$PIBOX_HOST_VERSION.tar.gz
-fi
-tar -xzf /opt/pibox-host/pibox-host-$PIBOX_HOST_VERSION.tar.gz --directory=$TARGET_DIR
-cp $TARGET_DIR/pibox-host.service /etc/systemd/system/pibox-host.service
-sed -i "s/PIBOX_HOST_VERSION/$PIBOX_HOST_VERSION/g" /etc/systemd/system/pibox-host.service
-systemctl daemon-reload
-systemctl enable pibox-host.service
 
 # Reduce logging and store in memory to reduce EMMC wear
 sed -i 's/.MaxLevelStore.*/MaxLevelStore=info/' /etc/systemd/journald.conf
@@ -167,10 +143,6 @@ echo '' >/var/log/auth.log
 sed -i s/#PasswordAuthentication\ yes/PasswordAuthentication\ no/ /etc/ssh/sshd_config
 ssh-keygen -A
 service ssh --full-restart
-
-# Place PiBox support public key in for local debugging at factory
-mkdir -p /root/.ssh
-echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCluY8xnwyrbfdxQebvawYI9qGvDqxsnKm8SYXKvJ8c0sO9dU3531dFHwkRLqdtiYQZl0xr+kuKSGGtFNJ1pUjJ+5t9tfwUZO3BL7DJkKYqUP4uuPg13Y1XFUsQw++IGW8pZNfcQjIDqYcaFd+Z0N7CCEVbHcBExaGYi/XaINl6EF+7aPSaymZrPXyzlVfFHbJlAN4+itWem4Ycm0oIu2Cw1YGXdap3RMrunjluYbHMWCJjpj1ipSpJsgyWq77+IX1Bom1pQypAZr1tu/lQyWFDtaJwcz3ZeSjqrTdFa5uxM4ppzVEgZEIQUKZmn/ETT9EWIsYugbhXKASdPdtx37ACpg0hkBZMBfffrOD9uhPjjhXhAzL3CCbGLqHdPj5SMtiBOJZ0+r8za0HK8NkTqpFNc9onKAtXXQr1Sajx4pd3tUPsyLDx4mROUxdOjRrO7xwmf4Ykxl7zy9a6W6NugJjupl4HF0tOm/P64gqSCjAZj0XpNDS+L8J2tVVVxqCpgYU=" >>/root/.ssh/authorized_keys
 
 # Clean bash history
 history -c && history -w
